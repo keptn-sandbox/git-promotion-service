@@ -16,7 +16,6 @@
     - name: "promotion"
       properties:
         repository: "https://github.com/markuslackner/keptn-argo-dev"
-        tostage: "hardening"
         secretname: "my-github-secret"
         strategy: "branches"
 ```
@@ -26,7 +25,6 @@
 | Property | Description | Sample |
 | -------- | ----------- | ------ |
 | repository | Repository URL (`https`) | https://github.com/markuslackner/keptn-argo-dev |
-| tostage | Target stage to promote | hardening |
 | secretname | Secretname for github token | testsecret |
 | strategy | Promotion strategy | branches |
 
@@ -48,10 +46,10 @@ The secret must be available in the same namespace as the *promotion-service*. T
 apiVersion: v1
 kind: Secret
 metadata:  
-  name: my-github-secret
+  name: meinsecret
   namespace: keptn
 stringData:
-  access-token: <github private access token> 
+  access-token: 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
 ```
 
 # ToDos / Remark
@@ -60,7 +58,6 @@ stringData:
 * Test needed for scope for github token (minimal needed scope)
 * Cache kubernetes client and maybe github client (implement proper backend)
 * consolidate error handling and messages with other services (keptn status and keptn result) 
-* Read next stage from a service from shipyard (configuration service? shipyard-controller?)
 * Define repository and secret in a different place (service and/or project level?, event input?) and not in promotion task properties. 
 * Implement unit tests
 * Implement nicer pull request: body, labels and such things
