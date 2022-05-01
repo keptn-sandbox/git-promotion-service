@@ -4,3 +4,6 @@ docs/
 deploy/
 Dockerfile
 chart/
+.github
+README.md
+skaffold.yaml
