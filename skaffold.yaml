@@ -1,0 +1,19 @@
+apiVersion: skaffold/v2beta22
+kind: Config
+build:
+  local:
+    useBuildkit: true
+  artifacts:
+    - image: docker.io/markuslackner/keptndev/promotion-service
+      docker:
+        dockerfile: Dockerfile
+deploy:
+  helm:
+    releases:
+      - name: promotion-service
+        chartPath: chart
+        artifactOverrides:
+          image: docker.io/markuslackner/keptndev/promotion-service
+          imageKey: docker.io/markuslackner/keptndev/promotion-service
+        imageStrategy:
+          helm: {}

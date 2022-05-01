@@ -1,0 +1,3 @@
+imageKey:
+  repository: docker.io/markuslackner/promotion-service
+  tag: latest

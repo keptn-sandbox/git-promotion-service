@@ -1,0 +1,18 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/instance: keptn
+    app.kubernetes.io/name: keptn-promotion-service-get-secrets
+    app.kubernetes.io/part-of: keptn-keptn
+    app.kubernetes.io/version: develop
+  name: keptn-promotion-service-get-secrets
+  namespace: keptn
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: keptn-get-secrets
+subjects:
+  - kind: ServiceAccount
+    name: keptn-promotion-service
