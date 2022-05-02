@@ -16,3 +16,6 @@ promotion-service
 
 #ide
 .idea
+
+#helm
+**/*.tgz

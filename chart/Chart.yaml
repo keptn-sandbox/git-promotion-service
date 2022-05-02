@@ -1,3 +1,3 @@
   apiVersion: v2
-  name: keptn/promotion-service
+  name: docker.com/markuslackner/promotion-service-chart
   version: 0.0.1

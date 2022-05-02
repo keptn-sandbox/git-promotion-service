@@ -41,3 +41,22 @@ jobs:
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  helm-build:
+    runs-on: ubuntu-latest
+    name: Helm Build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Helm Build Chart
+        run: |
+          helm package chart
+
+      - name: Helm Login
+        run: |
+          helm registry login docker.com -u markuslackner -p ${{ secrets.DOCKERHUB_ACCESSTOKEN }} 
+
+      - name: Helm Push to registry
+        run: |
+          helm push docker.com/markuslackner/promotion-service-chart-0.0.1.tgz oci://docker.com/markuslackner/promotion-service-chart
