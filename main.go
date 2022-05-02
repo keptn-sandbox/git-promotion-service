@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"keptn/promotion-service/pkg/handler"
+	"keptn/git-promotion-service/pkg/handler"
 	"log"
 	"os"
 	"os/signal"

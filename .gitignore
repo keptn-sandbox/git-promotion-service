@@ -12,7 +12,7 @@
 *.out
 
 #binary - go build
-promotion-service
+git-promotion-service
 
 #ide
 .idea
