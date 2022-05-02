@@ -83,7 +83,7 @@ func (a *GitPromotionTriggeredEventHandler) handleGitPromotionTriggeredEvent(inp
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
 		message = "error while reading nextStage"
-	} else if msg, err := openPullRequest(inputEvent.GitPromotion.Repository, inputEvent.Stage, nextStage, accessToken); err != nil {
+	} else if msg, err := openPullRequest(inputEvent.GitPromotion.Repository, inputEvent.Stage, nextStage, accessToken, buildBody(shkeptncontext, inputEvent.Project, inputEvent.Service, inputEvent.Stage)); err != nil {
 		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Errorf("handleGitPromotionTriggeredEvent: could not open pull request on repository %s", inputEvent.GitPromotion.Repository)
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
@@ -98,7 +98,15 @@ func (a *GitPromotionTriggeredEventHandler) handleGitPromotionTriggeredEvent(inp
 	return outgoingEvents
 }
 
-func openPullRequest(repositoryUrl, fromBranch, toBranch, accessToken string) (message string, err error) {
+func buildBody(keptncontext, projectName, serviceName, stage string) string {
+	return fmt.Sprintf(`Opened by cloud-automation sequence [%s](%s/bridge/project/%s/sequence/%s/stage/%s).
+
+Project: *%s* 
+Service: *%s* 
+Stage: *%s*`, keptncontext, os.Getenv("EXTERNAL_URL"), projectName, keptncontext, stage, projectName, serviceName, stage)
+}
+
+func openPullRequest(repositoryUrl, fromBranch, toBranch, accessToken, body string) (message string, err error) {
 	owner, repo, err := getGithubOwnerRepository(repositoryUrl)
 	if err != nil {
 		return message, err
@@ -132,7 +140,7 @@ func openPullRequest(repositoryUrl, fromBranch, toBranch, accessToken string) (m
 		Title: github.String(fmt.Sprintf("Promote to stage %s", toBranch)),
 		Head:  &fromBranch,
 		Base:  &toBranch,
-		Body:  github.String("> Pull Request opened by keptn "),
+		Body:  &body,
 	})
 	if err != nil {
 		return message, err

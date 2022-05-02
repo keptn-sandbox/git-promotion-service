@@ -51,6 +51,8 @@ spec:
                 secretKeyRef:
                   name: keptn-api-token
                   key: keptn-api-token
+            - name: EXTERNAL_URL
+              value: {{ .Values.externalUrl | required "external url must be set" }}
         - name: distributor
           image: keptn/distributor:0.14.1
           ports:

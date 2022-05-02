@@ -3,3 +3,4 @@ imageKey:
   tag: latest
 pullPolicy: Always
 pubSubUrl: 'nats://keptn-nats'
+externalUrl: ~
