@@ -33,7 +33,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: markuslackner/promotion-service:latest
+          tags: markuslackner/git-promotion-service:latest
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new
 
@@ -59,4 +59,4 @@ jobs:
 
       - name: Helm Push to registry
         run: |
-          helm push docker.com/markuslackner/promotion-service-chart-0.0.1.tgz oci://docker.com/markuslackner/promotion-service-chart
+          helm push docker.com/markuslackner/git-promotion-service-chart-0.0.1.tgz oci://docker.com/markuslackner/git-promotion-service-chart

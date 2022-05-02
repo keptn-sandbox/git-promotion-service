@@ -1,4 +1,4 @@
-module keptn/promotion-service
+module keptn/git-promotion-service
 
 go 1.17
 
@@ -9,6 +9,7 @@ require (
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/keptn/go-utils v0.13.1-0.20220318125157-fe974e59cc65
 	github.com/sirupsen/logrus v1.8.1
+	golang.org/x/oauth2 v0.0.0-20210819190943-2bc19b11175f
 	k8s.io/apimachinery v0.23.6
 	k8s.io/client-go v0.23.6
 )
@@ -37,7 +38,6 @@ require (
 	go.uber.org/multierr v1.1.0 // indirect
 	go.uber.org/zap v1.10.0 // indirect
 	golang.org/x/net v0.0.0-20211209124913-491a49abca63 // indirect
-	golang.org/x/oauth2 v0.0.0-20210819190943-2bc19b11175f // indirect
 	golang.org/x/sys v0.0.0-20210831042530-f4d43177bf5e // indirect
 	golang.org/x/term v0.0.0-20210615171337-6886f2dfbf5b // indirect
 	golang.org/x/text v0.3.7 // indirect

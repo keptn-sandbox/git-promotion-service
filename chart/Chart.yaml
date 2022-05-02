@@ -1,3 +1,4 @@
-  apiVersion: v2
-  name: docker.com/markuslackner/promotion-service-chart
-  version: 0.0.1
+apiVersion: v2
+name: git-promotion-service-chart
+version: 0.0.1
+

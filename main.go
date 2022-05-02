@@ -33,7 +33,7 @@ var gracefulShutdownKey = gracefulShutdownKeyType{}
 
 func main() {
 	logger.SetLevel(logger.InfoLevel)
-	logger.Printf("Starting keptn promotion service")
+	logger.Printf("Starting keptn git promotion service")
 	if os.Getenv(envVarLogLevel) != "" {
 		logLevel, err := logger.ParseLevel(os.Getenv(envVarLogLevel))
 		if err != nil {
@@ -97,7 +97,7 @@ func switchEvent(ctx context.Context, event cloudevents.Event) {
 	}
 
 	handlers := []handler.Handler{
-		handler.NewPromotionTriggeredEventHandler(keptnHandlerV2),
+		handler.NewGitPromotionTriggeredEventHandler(keptnHandlerV2),
 	}
 
 	unhandled := true

@@ -20,71 +20,71 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-const PromotionTaskName = "promotion"
+const GitPromotionTaskName = "git-promotion"
 const githubPathRegexp = "^/[a-zA-Z0-9-]+/[a-zA-Z-_.]+$"
 
-type PromotionTriggeredEventHandler struct {
+type GitPromotionTriggeredEventHandler struct {
 	keptn *keptnv2.Keptn
 }
 
-type PromotionTriggeredEventData struct {
+type GitPromotionTriggeredEventData struct {
 	keptnv2.EventData
-	Promotion Promotion `json:"promotion"`
+	GitPromotion GitPromotion `json:"gitpromotion"`
 }
 
-type Promotion struct {
+type GitPromotion struct {
 	Repository string `json:"repository"`
 	SecretName string `json:"secretname"`
-	Strategy string `json:"strategy"`
+	Strategy   string `json:"strategy"`
 }
 
-// NewPromotionTriggeredEventHandler returns a new promotion.triggered event handler
-func NewPromotionTriggeredEventHandler(keptn *keptnv2.Keptn) *PromotionTriggeredEventHandler {
-	return &PromotionTriggeredEventHandler{keptn: keptn}
+// NewGitPromotionTriggeredEventHandler returns a new promotion.triggered event handler
+func NewGitPromotionTriggeredEventHandler(keptn *keptnv2.Keptn) *GitPromotionTriggeredEventHandler {
+	return &GitPromotionTriggeredEventHandler{keptn: keptn}
 }
 
 // IsTypeHandled godoc
-func (a *PromotionTriggeredEventHandler) IsTypeHandled(event cloudevents.Event) bool {
-	return event.Type() == keptnv2.GetTriggeredEventType(PromotionTaskName)
+func (a *GitPromotionTriggeredEventHandler) IsTypeHandled(event cloudevents.Event) bool {
+	return event.Type() == keptnv2.GetTriggeredEventType(GitPromotionTaskName)
 }
 
 // Handle godoc
-func (a *PromotionTriggeredEventHandler) Handle(event cloudevents.Event, keptnHandler *keptnv2.Keptn) {
-	data := &PromotionTriggeredEventData{}
+func (a *GitPromotionTriggeredEventHandler) Handle(event cloudevents.Event, keptnHandler *keptnv2.Keptn) {
+	data := &GitPromotionTriggeredEventData{}
 	if err := event.DataAs(data); err != nil {
-		logger.WithError(err).Error("failed to parse PromotionTriggeredEventData")
+		logger.WithError(err).Error("failed to parse GitPromotionTriggeredEventData")
 		return
 	}
-	outgoingEvents := a.handlePromotionTriggeredEvent(*data, event.Context.GetID(), keptnHandler.KeptnContext)
+	outgoingEvents := a.handleGitPromotionTriggeredEvent(*data, event.Context.GetID(), keptnHandler.KeptnContext)
 	sendEvents(keptnHandler, outgoingEvents)
 }
 
-func (a *PromotionTriggeredEventHandler) handlePromotionTriggeredEvent(inputEvent PromotionTriggeredEventData,
+func (a *GitPromotionTriggeredEventHandler) handleGitPromotionTriggeredEvent(inputEvent GitPromotionTriggeredEventData,
 	triggeredID, shkeptncontext string) []cloudevents.Event {
 	outgoingEvents := make([]cloudevents.Event, 0)
 
-	startedEvent := a.getPromotionStartedEvent(inputEvent, triggeredID, shkeptncontext)
+	startedEvent := a.getGitPromotionStartedEvent(inputEvent, triggeredID, shkeptncontext)
 	outgoingEvents = append(outgoingEvents, *startedEvent)
-	logger.WithField("func", "handlePromotionTriggeredEvent").Infof("start promoting from %s in repository %s with strategy %s. The accesstoken should be found in secret %s", inputEvent.Stage, inputEvent.Promotion.Strategy, inputEvent.Promotion.Repository, inputEvent.Promotion.SecretName)
+	logger.WithField("func", "handleGitPromotionTriggeredEvent").Infof("start promoting from %s in repository %s with strategy %s. The accesstoken should be found in secret %s", inputEvent.Stage, inputEvent.GitPromotion.Strategy, inputEvent.GitPromotion.Repository, inputEvent.GitPromotion.SecretName)
 	var status keptnv2.StatusType
 	var result keptnv2.ResultType
 	var message string
-	if val := validateInputEvent(inputEvent) ; len(val) > 0 {
+	if val := validateInputEvent(inputEvent); len(val) > 0 {
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
 		message = "validation error: " + strings.Join(val, ",")
-	} else if accessToken, err := getAccessToken(inputEvent.Promotion.SecretName) ; err != nil {
-		logger.WithField("func", "handlePromotionTriggeredEvent").WithError(err).Errorf("handlePromotionTriggeredEvent: error while reading secret with name %s", inputEvent.Promotion.SecretName)
+	} else if accessToken, err := getAccessToken(inputEvent.GitPromotion.SecretName); err != nil {
+		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Errorf("handleGitPromotionTriggeredEvent: error while reading secret with name %s", inputEvent.GitPromotion.SecretName)
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
 		message = "error while reading secret"
-	} else if nextStage, err := getNextStage(inputEvent.Project, inputEvent.Stage) ; err != nil {
-		logger.WithField("func", "handlePromotionTriggeredEvent").WithError(err).Error("handlePromotionTriggeredEvent: error while reading nextStage")
+	} else if nextStage, err := getNextStage(inputEvent.Project, inputEvent.Stage); err != nil {
+		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Error("handleGitPromotionTriggeredEvent: error while reading nextStage")
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
 		message = "error while reading nextStage"
-	} else if msg,err := openPullRequest(inputEvent.Promotion.Repository, inputEvent.Stage, nextStage, accessToken) ; err != nil {
-		logger.WithField("func", "handlePromotionTriggeredEvent").WithError(err).Errorf("handlePromotionTriggeredEvent: could not open pull request on repository %s", inputEvent.Promotion.Repository)
+	} else if msg, err := openPullRequest(inputEvent.GitPromotion.Repository, inputEvent.Stage, nextStage, accessToken); err != nil {
+		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Errorf("handleGitPromotionTriggeredEvent: could not open pull request on repository %s", inputEvent.GitPromotion.Repository)
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
 		message = "error while opening pull request"
@@ -93,7 +93,7 @@ func (a *PromotionTriggeredEventHandler) handlePromotionTriggeredEvent(inputEven
 		result = keptnv2.ResultPass
 		message = msg
 	}
-    finishedEvent := a.getPromotionFinishedEvent(inputEvent, status, result, message, triggeredID, shkeptncontext)
+	finishedEvent := a.getGitPromotionFinishedEvent(inputEvent, status, result, message, triggeredID, shkeptncontext)
 	outgoingEvents = append(outgoingEvents, *finishedEvent)
 	return outgoingEvents
 }
@@ -118,8 +118,8 @@ func openPullRequest(repositoryUrl, fromBranch, toBranch, accessToken string) (m
 		return fmt.Sprintf("no difference between branches %s and %s found => nothing todo", fromBranch, toBranch), nil
 	}
 	pull, _, err := client.PullRequests.List(ctx, owner, repo, &github.PullRequestListOptions{
-		Head:        fromBranch,
-		Base:        toBranch,
+		Head: fromBranch,
+		Base: toBranch,
 	})
 	if err != nil {
 		return message, err
@@ -129,10 +129,10 @@ func openPullRequest(repositoryUrl, fromBranch, toBranch, accessToken string) (m
 		return fmt.Sprintf("pull request already open: %s", *pull[0].HTMLURL), nil
 	}
 	pr, _, err := client.PullRequests.Create(ctx, owner, repo, &github.NewPullRequest{
-		Title:               github.String(fmt.Sprintf("Promote to stage %s", toBranch)),
-		Head:                &fromBranch,
-		Base:                &toBranch,
-		Body:                github.String("> Pull Request opened by keptn "),
+		Title: github.String(fmt.Sprintf("Promote to stage %s", toBranch)),
+		Head:  &fromBranch,
+		Base:  &toBranch,
+		Body:  github.String("> Pull Request opened by keptn "),
 	})
 	if err != nil {
 		return message, err
@@ -141,8 +141,8 @@ func openPullRequest(repositoryUrl, fromBranch, toBranch, accessToken string) (m
 	return fmt.Sprintf("opened pull request %s", *pr.HTMLURL), nil
 }
 
-func getGithubOwnerRepository(raw string) (owner,repository string, err error) {
-	u,err := url.Parse(raw)
+func getGithubOwnerRepository(raw string) (owner, repository string, err error) {
+	u, err := url.Parse(raw)
 	if err != nil {
 		return owner, repository, err
 	}
@@ -150,51 +150,51 @@ func getGithubOwnerRepository(raw string) (owner,repository string, err error) {
 	return splittedUrl[1], splittedUrl[2], nil
 }
 
-func (a *PromotionTriggeredEventHandler) getPromotionStartedEvent(inputEvent PromotionTriggeredEventData, triggeredID, shkeptncontext string) *cloudevents.Event {
+func (a *GitPromotionTriggeredEventHandler) getGitPromotionStartedEvent(inputEvent GitPromotionTriggeredEventData, triggeredID, shkeptncontext string) *cloudevents.Event {
 	promotionStartedEvent := keptnv2.EventData{
-			Project: inputEvent.Project,
-			Stage:   inputEvent.Stage,
-			Service: inputEvent.Service,
-			Labels:  inputEvent.Labels,
-			Status:  keptnv2.StatusSucceeded,
-			Message: "Promotion started",
+		Project: inputEvent.Project,
+		Stage:   inputEvent.Stage,
+		Service: inputEvent.Service,
+		Labels:  inputEvent.Labels,
+		Status:  keptnv2.StatusSucceeded,
+		Message: "GitPromotion started",
 	}
-	return getCloudEvent(promotionStartedEvent, keptnv2.GetStartedEventType(PromotionTaskName), shkeptncontext, triggeredID)
+	return getCloudEvent(promotionStartedEvent, keptnv2.GetStartedEventType(GitPromotionTaskName), shkeptncontext, triggeredID)
 }
 
-func (a *PromotionTriggeredEventHandler) getPromotionFinishedEvent(inputEvent PromotionTriggeredEventData,
+func (a *GitPromotionTriggeredEventHandler) getGitPromotionFinishedEvent(inputEvent GitPromotionTriggeredEventData,
 	status keptnv2.StatusType, result keptnv2.ResultType, message string, triggeredID, shkeptncontext string) *cloudevents.Event {
 	promotionFinishedEvent := keptnv2.EventData{
-			Project: inputEvent.Project,
-			Stage:   inputEvent.Stage,
-			Service: inputEvent.Service,
-			Labels:  inputEvent.Labels,
-			Status:  status,
-			Result:  result,
-			Message: message,
+		Project: inputEvent.Project,
+		Stage:   inputEvent.Stage,
+		Service: inputEvent.Service,
+		Labels:  inputEvent.Labels,
+		Status:  status,
+		Result:  result,
+		Message: message,
 	}
-	return getCloudEvent(promotionFinishedEvent, keptnv2.GetFinishedEventType(PromotionTaskName), shkeptncontext, triggeredID)
+	return getCloudEvent(promotionFinishedEvent, keptnv2.GetFinishedEventType(GitPromotionTaskName), shkeptncontext, triggeredID)
 }
 
-func validateInputEvent(inputEvent PromotionTriggeredEventData) (validationErrrors []string) {
-	if inputEvent.Promotion.Strategy == "" {
+func validateInputEvent(inputEvent GitPromotionTriggeredEventData) (validationErrrors []string) {
+	if inputEvent.GitPromotion.Strategy == "" {
 		validationErrrors = append(validationErrrors, `"strategy" missing`)
-	} else if inputEvent.Promotion.Strategy != "branches" {
+	} else if inputEvent.GitPromotion.Strategy != "branches" {
 		validationErrrors = append(validationErrrors, `"strategy" invalid`)
 	}
-	if inputEvent.Promotion.SecretName == "" {
+	if inputEvent.GitPromotion.SecretName == "" {
 		validationErrrors = append(validationErrrors, `"secretname" missing`)
 	}
-	if inputEvent.Promotion.Repository == "" {
+	if inputEvent.GitPromotion.Repository == "" {
 		validationErrrors = append(validationErrrors, `"repository" missing`)
 	} else {
-		u, err := url.Parse(inputEvent.Promotion.Repository)
+		u, err := url.Parse(inputEvent.GitPromotion.Repository)
 		if err != nil {
 			validationErrrors = append(validationErrrors, `"repository" is not a valid URL`)
 		} else {
-			if u.Scheme != "https" || u.Host != "github.com"  {
+			if u.Scheme != "https" || u.Host != "github.com" {
 				validationErrrors = append(validationErrrors, `"repository" must be a "https" url to a repository on github.com`)
-			} else if matched, err := regexp.MatchString(githubPathRegexp, u.Path) ; err!=nil || !matched {
+			} else if matched, err := regexp.MatchString(githubPathRegexp, u.Path); err != nil || !matched {
 				validationErrrors = append(validationErrrors, `"repository" must be a "https" url to a repository on github.com`)
 			}
 		}
@@ -204,12 +204,12 @@ func validateInputEvent(inputEvent PromotionTriggeredEventData) (validationErrro
 }
 
 func getAccessToken(secretName string) (accessToken string, err error) {
-	if client, err := createKubeAPI() ; err != nil {
+	if client, err := createKubeAPI(); err != nil {
 		return accessToken, err
-	} else if secret, err := client.CoreV1().Secrets(os.Getenv("K8S_NAMESPACE")).Get(context.Background(), secretName, v1.GetOptions{}) ; err != nil {
+	} else if secret, err := client.CoreV1().Secrets(os.Getenv("K8S_NAMESPACE")).Get(context.Background(), secretName, v1.GetOptions{}); err != nil {
 		return accessToken, err
 	} else {
-		logger.WithField("func","getAccessToken").Infof("found access-token with length %d in secret %s", len(secret.Data["access-token"]), secret.Name)
+		logger.WithField("func", "getAccessToken").Infof("found access-token with length %d in secret %s", len(secret.Data["access-token"]), secret.Name)
 		return string(secret.Data["access-token"]), nil
 	}
 }
@@ -231,14 +231,14 @@ func getNextStage(project string, stage string) (nextStage string, err error) {
 	apiSet, err := api.New(os.Getenv("API_BASE_URL"), api.WithAuthToken(os.Getenv("API_AUTH_TOKEN")))
 	if err != nil {
 		logger.WithField("func", "getNextStage").WithError(err).Errorf("could not get apiSet for project %s with stage %s", project, stage)
-		return nextStage,err
+		return nextStage, err
 	}
 	stages, err := apiSet.StagesV1().GetAllStages(project)
 	if err != nil {
 		logger.WithField("func", "getNextStage").WithError(err).Errorf("could not get all stages for project %s with stage %s", project, stage)
-		return nextStage,err
+		return nextStage, err
 	}
-	for i,s := range stages {
+	for i, s := range stages {
 		if s.StageName == stage {
 			if len(stages) <= (i + 1) {
 				err = errors.New(fmt.Sprintf("no stage defined after stage %s", stage))

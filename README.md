@@ -1,4 +1,4 @@
-# Promotion Service
+# Git Promotion Service
 
 # Deployment
 
@@ -13,7 +13,7 @@
   triggeredOn:
     - event: "dev.evaluation.finished"
   tasks:
-    - name: "promotion"
+    - name: "git-promotion"
       properties:
         repository: "https://github.com/markuslackner/keptn-argo-dev"
         secretname: "my-github-secret"

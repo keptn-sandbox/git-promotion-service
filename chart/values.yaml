@@ -1,3 +1,3 @@
 imageKey:
-  repository: docker.io/markuslackner/promotion-service
+  repository: docker.io/markuslackner/git-promotion-service
   tag: latest
