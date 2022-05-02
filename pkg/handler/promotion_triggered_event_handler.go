@@ -65,7 +65,7 @@ func (a *GitPromotionTriggeredEventHandler) handleGitPromotionTriggeredEvent(inp
 
 	startedEvent := a.getGitPromotionStartedEvent(inputEvent, triggeredID, shkeptncontext)
 	outgoingEvents = append(outgoingEvents, *startedEvent)
-	logger.WithField("func", "handleGitPromotionTriggeredEvent").Infof("start promoting from %s in repository %s with strategy %s. The accesstoken should be found in secret %s", inputEvent.Stage, inputEvent.GitPromotion.Strategy, inputEvent.GitPromotion.Repository, inputEvent.GitPromotion.SecretName)
+	logger.WithField("func", "handleGitPromotionTriggeredEvent").Infof("start promoting from %s in repository %s with strategy %s. The accesstoken should be found in secret %s", inputEvent.Stage, inputEvent.GitPromotion.Repository, inputEvent.GitPromotion.Strategy, inputEvent.GitPromotion.SecretName)
 	var status keptnv2.StatusType
 	var result keptnv2.ResultType
 	var message string
