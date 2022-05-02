@@ -7,6 +7,9 @@ jobs:
   docker-build:
     runs-on: ubuntu-latest
     name: BuildX Docker Build
+    permissions:
+      packages: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -14,11 +17,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1.6.0
 
-      - name: Login to Docker Hub
+      - name: Login to Github Container Registry
         uses: docker/login-action@v1
         with:
-          username: markuslackner
-          password: ${{ secrets.DOCKERHUB_ACCESSTOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/cache@v3
         name: Restore cache
@@ -33,7 +37,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: markuslackner/git-promotion-service:latest
+          tags: ghcr.io/markuslackner/git-promotion-service:latest
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new
 
@@ -45,6 +49,9 @@ jobs:
   helm-build:
     runs-on: ubuntu-latest
     name: Helm Build
+    permissions:
+      packages: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -55,8 +62,8 @@ jobs:
 
       - name: Helm Login
         run: |
-          helm registry login docker.com -u markuslackner -p ${{ secrets.DOCKERHUB_ACCESSTOKEN }} 
+          helm registry login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
 
       - name: Helm Push to registry
         run: |
-          helm push docker.com/markuslackner/git-promotion-service-chart-0.0.1.tgz oci://docker.com/markuslackner/git-promotion-service-chart
+          helm push git-promotion-service-chart-0.0.1.tgz oci://ghcr.io/markuslackner
