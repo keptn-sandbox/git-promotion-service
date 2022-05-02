@@ -29,7 +29,7 @@ type GitPromotionTriggeredEventHandler struct {
 
 type GitPromotionTriggeredEventData struct {
 	keptnv2.EventData
-	GitPromotion GitPromotion `json:"gitpromotion"`
+	GitPromotion GitPromotion `json:"git-promotion"`
 }
 
 type GitPromotion struct {

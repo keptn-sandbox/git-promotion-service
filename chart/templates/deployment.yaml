@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: git-promotion-service
-  namespace: keptn
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: git-promotion-service
     app.kubernetes.io/instance: keptn
@@ -64,7 +64,7 @@ spec:
               cpu: "100m"
           env:
             - name: PUBSUB_URL
-              value: 'nats://keptn-nats'
+              value: {{ .Values.pubSubUrl }}
             - name: PUBSUB_TOPIC
               value: 'sh.keptn.event.git-promotion.>'
             - name: PUBSUB_RECIPIENT

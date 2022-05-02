@@ -46,10 +46,10 @@ The secret must be available in the same namespace as the *promotion-service*. T
 apiVersion: v1
 kind: Secret
 metadata:  
-  name: meinsecret
-  namespace: keptn
+  name: keptncademo
+  namespace: inn12345
 stringData:
-  access-token: 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
+  access-token: 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
 ```
 
 # ToDos / Remark

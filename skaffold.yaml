@@ -12,6 +12,8 @@ deploy:
     releases:
       - name: promotion-service
         chartPath: chart
+        setValues:
+          pullPolicy: IfNotPresent
         artifactOverrides:
           image: docker.io/markuslackner/keptndev/promotion-service
           imageKey: docker.io/markuslackner/keptndev/promotion-service

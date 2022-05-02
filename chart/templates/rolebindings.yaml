@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/part-of: keptn-keptn
     app.kubernetes.io/version: develop
   name: keptn-git-promotion-service-get-secrets
-  namespace: keptn
+  namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
