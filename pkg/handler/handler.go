@@ -2,7 +2,6 @@ package handler
 
 import (
 	logger "github.com/sirupsen/logrus"
-	"net/url"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -26,8 +25,6 @@ func sendEvents(keptnHandler *keptnv2.Keptn, events []cloudevents.Event) {
 }
 
 func getCloudEvent(data interface{}, ceType string, shkeptncontext string, triggeredID string) *cloudevents.Event {
-	source, _ := url.Parse("promotion-service")
-
 	extensions := map[string]interface{}{"shkeptncontext": shkeptncontext}
 	if triggeredID != "" {
 		extensions["triggeredid"] = triggeredID
@@ -37,7 +34,7 @@ func getCloudEvent(data interface{}, ceType string, shkeptncontext string, trigg
 	event.SetID(uuid.New().String())
 	event.SetTime(time.Now())
 	event.SetType(ceType)
-	event.SetSource(source.String())
+	event.SetSource("git-promotion-service")
 	event.SetDataContentType(cloudevents.ApplicationJSON)
 	event.SetExtension("shkeptncontext", shkeptncontext)
 	event.SetExtension("triggeredid", triggeredID)

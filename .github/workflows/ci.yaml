@@ -37,7 +37,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/markuslackner/git-promotion-service:latest
+          tags: ghcr.io/${{ github.repository }}:latest
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new
 
@@ -66,4 +66,4 @@ jobs:
 
       - name: Helm Push to registry
         run: |
-          helm push git-promotion-service-chart-0.0.1.tgz oci://ghcr.io/markuslackner
+          helm push git-promotion-service-chart-0.0.1.tgz oci://ghcr.io/${{ github.repository_owner }}

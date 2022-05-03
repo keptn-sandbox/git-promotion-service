@@ -39,7 +39,7 @@ type GitPromotion struct {
 	Strategy   string `json:"strategy"`
 }
 
-// NewGitPromotionTriggeredEventHandler returns a new promotion.triggered event handler
+// NewGitPromotionTriggeredEventHandler returns a new GitPromotionTriggeredEventHandler
 func NewGitPromotionTriggeredEventHandler(keptn *keptnv2.Keptn) *GitPromotionTriggeredEventHandler {
 	return &GitPromotionTriggeredEventHandler{keptn: keptn}
 }
@@ -146,8 +146,8 @@ func managePullRequest(repositoryUrl, fromBranch, toBranch, accessToken, title, 
 			}); err != nil {
 				return message, err
 			}
-			logger.WithField("func", "managePullRequest").Infof("edited pull request %d in repo %s from branch %s to %s", *pull[0].Number, repositoryUrl, fromBranch, toBranch)
-			return fmt.Sprintf("edited pull request %s", *pull[0].HTMLURL), nil
+			logger.WithField("func", "managePullRequest").Infof("updated pull request %d in repo %s from branch %s to %s", *pull[0].Number, repositoryUrl, fromBranch, toBranch)
+			return fmt.Sprintf("updated pull request %s", *pull[0].HTMLURL), nil
 		} else {
 			return fmt.Sprintf("unmanaged pull request already open: %s", *pull[0].HTMLURL), nil
 		}
@@ -176,7 +176,7 @@ func getGithubOwnerRepository(raw string) (owner, repository string, err error) 
 }
 
 func (a *GitPromotionTriggeredEventHandler) getGitPromotionStartedEvent(inputEvent GitPromotionTriggeredEventData, triggeredID, shkeptncontext string) *cloudevents.Event {
-	promotionStartedEvent := keptnv2.EventData{
+	gitPromotionStartedEvent := keptnv2.EventData{
 		Project: inputEvent.Project,
 		Stage:   inputEvent.Stage,
 		Service: inputEvent.Service,
@@ -184,12 +184,12 @@ func (a *GitPromotionTriggeredEventHandler) getGitPromotionStartedEvent(inputEve
 		Status:  keptnv2.StatusSucceeded,
 		Message: "GitPromotion started",
 	}
-	return getCloudEvent(promotionStartedEvent, keptnv2.GetStartedEventType(GitPromotionTaskName), shkeptncontext, triggeredID)
+	return getCloudEvent(gitPromotionStartedEvent, keptnv2.GetStartedEventType(GitPromotionTaskName), shkeptncontext, triggeredID)
 }
 
 func (a *GitPromotionTriggeredEventHandler) getGitPromotionFinishedEvent(inputEvent GitPromotionTriggeredEventData,
 	status keptnv2.StatusType, result keptnv2.ResultType, message string, triggeredID, shkeptncontext string) *cloudevents.Event {
-	promotionFinishedEvent := keptnv2.EventData{
+	gitPromotionFinishedEvent := keptnv2.EventData{
 		Project: inputEvent.Project,
 		Stage:   inputEvent.Stage,
 		Service: inputEvent.Service,
@@ -198,7 +198,7 @@ func (a *GitPromotionTriggeredEventHandler) getGitPromotionFinishedEvent(inputEv
 		Result:  result,
 		Message: message,
 	}
-	return getCloudEvent(promotionFinishedEvent, keptnv2.GetFinishedEventType(GitPromotionTaskName), shkeptncontext, triggeredID)
+	return getCloudEvent(gitPromotionFinishedEvent, keptnv2.GetFinishedEventType(GitPromotionTaskName), shkeptncontext, triggeredID)
 }
 
 func validateInputEvent(inputEvent GitPromotionTriggeredEventData) (validationErrrors []string) {

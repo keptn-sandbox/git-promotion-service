@@ -18,9 +18,8 @@ For dev cluster use for example
 
 ```
 helm template \
-  --namespace inn12345 \
-  --set pubSubUrl="nats://keptn-nats-cluster" \
-  --set externalUrl="https://inn12345.cloudautomation.dev.dynatracelabs.com" \
+  --namespace my-namespace \
+  --set externalUrl="https://my-keptn-url" \
   oci://ghcr.io/markuslackner/git-promotion-service-chart --version 0.0.1 \
   | kubectl apply -f -
 ```
@@ -73,10 +72,10 @@ The secret must be available in the same namespace as the *promotion-service*. T
 apiVersion: v1
 kind: Secret
 metadata:  
-  name: keptncademo
-  namespace: inn12345
+  name: my-secret
+  namespace: my-namespace
 stringData:
-  access-token: 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
+  access-token: xxxxxxxxxxxxxxxxx
 ```
 
 # ToDos / Remark
@@ -87,8 +86,6 @@ stringData:
 * consolidate error handling and messages with other services (keptn status and keptn result) 
 * Define repository and secret in a different place (service and/or project level?, event input?) and not in promotion task properties. 
 * Implement unit tests
-* Implement nicer pull request: body, labels and such things
-* Implement update of pull request (only needed if there is some information in body that needs to be updated)
 * Implement approve
 * Implement bitbucket and gitlab apis
 * migrate from distributor sidecar to library
