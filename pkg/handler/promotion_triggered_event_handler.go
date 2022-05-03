@@ -22,6 +22,7 @@ import (
 
 const GitPromotionTaskName = "git-promotion"
 const githubPathRegexp = "^/[a-zA-Z0-9-]+/[a-zA-Z-_.]+$"
+const keptnPullRequestTitlePrefix = "keptn:"
 
 type GitPromotionTriggeredEventHandler struct {
 	keptn *keptnv2.Keptn
@@ -83,7 +84,7 @@ func (a *GitPromotionTriggeredEventHandler) handleGitPromotionTriggeredEvent(inp
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
 		message = "error while reading nextStage"
-	} else if msg, err := openPullRequest(inputEvent.GitPromotion.Repository, inputEvent.Stage, nextStage, accessToken, buildBody(shkeptncontext, inputEvent.Project, inputEvent.Service, inputEvent.Stage)); err != nil {
+	} else if msg, err := managePullRequest(inputEvent.GitPromotion.Repository, inputEvent.Stage, nextStage, accessToken, buildTitle(shkeptncontext, nextStage), buildBody(shkeptncontext, inputEvent.Project, inputEvent.Service, inputEvent.Stage)); err != nil {
 		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Errorf("handleGitPromotionTriggeredEvent: could not open pull request on repository %s", inputEvent.GitPromotion.Repository)
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
@@ -98,6 +99,10 @@ func (a *GitPromotionTriggeredEventHandler) handleGitPromotionTriggeredEvent(inp
 	return outgoingEvents
 }
 
+func buildTitle(keptncontext, nextStage string) string {
+	return fmt.Sprintf("%s Promote to stage %s (ctx: %s)", keptnPullRequestTitlePrefix, nextStage, keptncontext)
+}
+
 func buildBody(keptncontext, projectName, serviceName, stage string) string {
 	return fmt.Sprintf(`Opened by cloud-automation sequence [%s](%s/bridge/project/%s/sequence/%s/stage/%s).
 
@@ -106,7 +111,7 @@ Service: *%s*
 Stage: *%s*`, keptncontext, os.Getenv("EXTERNAL_URL"), projectName, keptncontext, stage, projectName, serviceName, stage)
 }
 
-func openPullRequest(repositoryUrl, fromBranch, toBranch, accessToken, body string) (message string, err error) {
+func managePullRequest(repositoryUrl, fromBranch, toBranch, accessToken, title, body string) (message string, err error) {
 	owner, repo, err := getGithubOwnerRepository(repositoryUrl)
 	if err != nil {
 		return message, err
@@ -122,7 +127,7 @@ func openPullRequest(repositoryUrl, fromBranch, toBranch, accessToken, body stri
 		return message, err
 	}
 	if len(compare.Commits) == 0 {
-		logger.WithField("func", "openPullRequest").Infof("no difference found in repo %s from branch %s to %s", repositoryUrl, fromBranch, toBranch)
+		logger.WithField("func", "managePullRequest").Infof("no difference found in repo %s from branch %s to %s", repositoryUrl, fromBranch, toBranch)
 		return fmt.Sprintf("no difference between branches %s and %s found => nothing todo", fromBranch, toBranch), nil
 	}
 	pull, _, err := client.PullRequests.List(ctx, owner, repo, &github.PullRequestListOptions{
@@ -133,20 +138,32 @@ func openPullRequest(repositoryUrl, fromBranch, toBranch, accessToken, body stri
 		return message, err
 	}
 	if len(pull) > 0 {
-		logger.WithField("func", "openPullRequest").Infof("pull request in repo %s from branch %s to %s already open with id %d", repositoryUrl, fromBranch, toBranch, *pull[0].Number)
-		return fmt.Sprintf("pull request already open: %s", *pull[0].HTMLURL), nil
+		logger.WithField("func", "managePullRequest").Infof("pull request in repo %s from branch %s to %s already open with id %d and title %s", repositoryUrl, fromBranch, toBranch, *pull[0].Number, *pull[0].Title)
+		if strings.HasPrefix(*pull[0].Title, keptnPullRequestTitlePrefix) {
+			if _, _, err := client.PullRequests.Edit(ctx, owner, repo, *pull[0].Number, &github.PullRequest{
+				Title: &title,
+				Body:  &body,
+			}); err != nil {
+				return message, err
+			}
+			logger.WithField("func", "managePullRequest").Infof("edited pull request %d in repo %s from branch %s to %s", *pull[0].Number, repositoryUrl, fromBranch, toBranch)
+			return fmt.Sprintf("edited pull request %s", *pull[0].HTMLURL), nil
+		} else {
+			return fmt.Sprintf("unmanaged pull request already open: %s", *pull[0].HTMLURL), nil
+		}
+	} else {
+		pr, _, err := client.PullRequests.Create(ctx, owner, repo, &github.NewPullRequest{
+			Title: &title,
+			Head:  &fromBranch,
+			Base:  &toBranch,
+			Body:  &body,
+		})
+		if err != nil {
+			return message, err
+		}
+		logger.WithField("func", "managePullRequest").Infof("opened pull request %d in repo %s from branch %s to %s", *pr.Number, repositoryUrl, fromBranch, toBranch)
+		return fmt.Sprintf("opened pull request %s", *pr.HTMLURL), nil
 	}
-	pr, _, err := client.PullRequests.Create(ctx, owner, repo, &github.NewPullRequest{
-		Title: github.String(fmt.Sprintf("Promote to stage %s", toBranch)),
-		Head:  &fromBranch,
-		Base:  &toBranch,
-		Body:  &body,
-	})
-	if err != nil {
-		return message, err
-	}
-	logger.WithField("func", "openPullRequest").Infof("opened pull request %d in repo %s from branch %s to %s", *pr.Number, repositoryUrl, fromBranch, toBranch)
-	return fmt.Sprintf("opened pull request %s", *pr.HTMLURL), nil
 }
 
 func getGithubOwnerRepository(raw string) (owner, repository string, err error) {

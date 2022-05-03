@@ -1,8 +1,35 @@
 # Git Promotion Service
 
+# Artifacts
+
+Image and helm chart are published into github packages:
+
+#### Docker image
+
+Github link: https://github.com/markuslackner/git-promotion-service/pkgs/container/git-promotion-service
+
+#### Helm Chart
+
+Github link: https://github.com/markuslackner/git-promotion-service/pkgs/container/git-promotion-service-chart
+
 # Deployment
 
-* Image build
+For dev cluster use for example
+
+```
+helm template \
+  --namespace inn12345 \
+  --set pubSubUrl="nats://keptn-nats-cluster" \
+  --set externalUrl="https://inn12345.cloudautomation.dev.dynatracelabs.com" \
+  oci://ghcr.io/markuslackner/git-promotion-service-chart --version 0.0.1 \
+  | kubectl apply -f -
+```
+
+# Test
+
+```
+keptn trigger delivery --project=temp-project --service=temp-service --stage=dev --image=test --tag=1.1
+```
 
 ## shipyard.yaml
 
