@@ -6,11 +6,11 @@ Image and helm chart are published into github packages:
 
 #### Docker image
 
-Github link: https://github.com/markuslackner/git-promotion-service/pkgs/container/git-promotion-service
+Github link: https://github.com/keptn-sandbox/git-promotion-service/pkgs/container/git-promotion-service
 
 #### Helm Chart
 
-Github link: https://github.com/markuslackner/git-promotion-service/pkgs/container/git-promotion-service-chart
+Github link: https://github.com/keptn-sandbox/git-promotion-service/pkgs/container/git-promotion-service-chart
 
 # Deployment
 
@@ -20,9 +20,11 @@ For dev cluster use for example
 helm template \
   --namespace my-namespace \
   --set externalUrl="https://my-keptn-url" \
-  oci://ghcr.io/markuslackner/git-promotion-service-chart --version 0.0.1 \
+  oci://ghcr.io/keptn-sandbox/git-promotion-service-chart --version 0.0.1 \
   | kubectl apply -f -
 ```
+
+> Add `--set pubSubUrl='nats://keptn-nats-cluster' for keptn version < 0.14
 
 # Test
 

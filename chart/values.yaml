@@ -1,5 +1,5 @@
 imageKey:
-  repository: ghcr.io/markuslackner/git-promotion-service
+  repository: ghcr.io/keptn-sandbox/git-promotion-service
   tag: latest
 pullPolicy: Always
 pubSubUrl: 'nats://keptn-nats'
