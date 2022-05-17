@@ -5,43 +5,42 @@ import (
 	"errors"
 	"fmt"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/keptn/go-utils/pkg/api/models"
 	api "github.com/keptn/go-utils/pkg/api/utils"
+	keptnv2 "github.com/keptn/go-utils/pkg/lib/v0_2_0"
 	logger "github.com/sirupsen/logrus"
-	"golang.org/x/oauth2"
+	"gopkg.in/yaml.v3"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
+	"k8s.io/client-go/kubernetes"
+	"keptn/git-promotion-service/pkg/model"
+	"keptn/git-promotion-service/pkg/replacer"
+	"keptn/git-promotion-service/pkg/repoaccess"
 	"net/url"
 	"os"
 	"regexp"
 	"strings"
-
-	"github.com/google/go-github/github"
-	keptnv2 "github.com/keptn/go-utils/pkg/lib/v0_2_0"
-	"k8s.io/client-go/kubernetes"
 )
 
 const GitPromotionTaskName = "git-promotion"
 const githubPathRegexp = "^/[a-zA-Z0-9-]+/[a-zA-Z-_.]+$"
 const keptnPullRequestTitlePrefix = "keptn:"
+const configurationResource = GitPromotionTaskName + ".yaml"
+const strategyBranch = "branch"
+const strategyFlatPR = "flat-pr"
 
 type GitPromotionTriggeredEventHandler struct {
-	keptn *keptnv2.Keptn
+	keptn      *keptnv2.Keptn
+	api        *api.APISet
+	kubeClient *kubernetes.Clientset
 }
 
 type GitPromotionTriggeredEventData struct {
 	keptnv2.EventData
-	GitPromotion GitPromotion `json:"git-promotion"`
-}
-
-type GitPromotion struct {
-	Repository string `json:"repository"`
-	SecretName string `json:"secretname"`
-	Strategy   string `json:"strategy"`
 }
 
 // NewGitPromotionTriggeredEventHandler returns a new GitPromotionTriggeredEventHandler
-func NewGitPromotionTriggeredEventHandler(keptn *keptnv2.Keptn) *GitPromotionTriggeredEventHandler {
-	return &GitPromotionTriggeredEventHandler{keptn: keptn}
+func NewGitPromotionTriggeredEventHandler(keptn *keptnv2.Keptn, api *api.APISet, kubeClient *kubernetes.Clientset) *GitPromotionTriggeredEventHandler {
+	return &GitPromotionTriggeredEventHandler{keptn: keptn, api: api, kubeClient: kubeClient}
 }
 
 // IsTypeHandled godoc
@@ -56,47 +55,247 @@ func (a *GitPromotionTriggeredEventHandler) Handle(event cloudevents.Event, kept
 		logger.WithError(err).Error("failed to parse GitPromotionTriggeredEventData")
 		return
 	}
-	outgoingEvents := a.handleGitPromotionTriggeredEvent(*data, event.Context.GetID(), keptnHandler.KeptnContext)
+	outgoingEvents := a.handleGitPromotionTriggeredEvent(event, *data, event.Context.GetID(), keptnHandler.KeptnContext)
 	sendEvents(keptnHandler, outgoingEvents)
 }
 
-func (a *GitPromotionTriggeredEventHandler) handleGitPromotionTriggeredEvent(inputEvent GitPromotionTriggeredEventData,
+func (a *GitPromotionTriggeredEventHandler) handleGitPromotionTriggeredEvent(event cloudevents.Event, inputEvent GitPromotionTriggeredEventData,
 	triggeredID, shkeptncontext string) []cloudevents.Event {
+	logger.WithField("func", "handleGitPromotionTriggeredEvent").Infof("start promoting service %s in project %s from stage %s", inputEvent.Stage, inputEvent.Service, inputEvent.Project)
+	if err := a.keptn.SendCloudEvent(*a.getGitPromotionStartedEvent(inputEvent, triggeredID, shkeptncontext)); err != nil {
+		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Errorf("sending started event failed")
+		return []cloudevents.Event{*a.getGitPromotionFinishedEvent(inputEvent, keptnv2.StatusErrored, keptnv2.ResultFailed, "sending starting event failed", triggeredID, shkeptncontext, nil)}
+	}
 	outgoingEvents := make([]cloudevents.Event, 0)
-
-	startedEvent := a.getGitPromotionStartedEvent(inputEvent, triggeredID, shkeptncontext)
-	outgoingEvents = append(outgoingEvents, *startedEvent)
-	logger.WithField("func", "handleGitPromotionTriggeredEvent").Infof("start promoting from %s in repository %s with strategy %s. The accesstoken should be found in secret %s", inputEvent.Stage, inputEvent.GitPromotion.Repository, inputEvent.GitPromotion.Strategy, inputEvent.GitPromotion.SecretName)
+	var nextStage string
+	if nextStageTemp, err := a.getNextStage(inputEvent.Project, inputEvent.Stage); err != nil {
+		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Error("handleGitPromotionTriggeredEvent: error while reading nextStage")
+		return []cloudevents.Event{*a.getGitPromotionFinishedEvent(inputEvent, keptnv2.StatusErrored, keptnv2.ResultFailed, "error while reading nextStage", triggeredID, shkeptncontext, nil)}
+	} else {
+		nextStage = nextStageTemp
+	}
+	config := a.getMergedConfiguration(inputEvent.GetProject(), inputEvent.GetStage(), nextStage, inputEvent.GetService())
+	logger.WithField("func", "handleGitPromotionTriggeredEvent").Infof("using git promotion config: strategy: %s, repository: %s, secret: %s", toString(config.Spec.Strategy), toString(config.Spec.Target.Repo), toString(config.Spec.Target.Secret))
 	var status keptnv2.StatusType
 	var result keptnv2.ResultType
 	var message string
-	if val := validateInputEvent(inputEvent); len(val) > 0 {
+	var prLink *string
+	if vs := validateConfig(config); len(vs) > 0 {
+		logger.WithField("func", "handleGitPromotionTriggeredEvent").Errorf("validation of configuration failed: %s", strings.Join(vs, ","))
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
-		message = "validation error: " + strings.Join(val, ",")
-	} else if accessToken, err := getAccessToken(inputEvent.GitPromotion.SecretName); err != nil {
-		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Errorf("handleGitPromotionTriggeredEvent: error while reading secret with name %s", inputEvent.GitPromotion.SecretName)
+		message = "validation error: " + strings.Join(vs, ",")
+	} else if accessToken, err := a.getAccessToken(*config.Spec.Target.Secret); err != nil {
+		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Errorf("handleGitPromotionTriggeredEvent: error while reading secret with name %s", *config.Spec.Target.Secret)
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
 		message = "error while reading secret"
-	} else if nextStage, err := getNextStage(inputEvent.Project, inputEvent.Stage); err != nil {
-		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Error("handleGitPromotionTriggeredEvent: error while reading nextStage")
-		status = keptnv2.StatusErrored
-		result = keptnv2.ResultFailed
-		message = "error while reading nextStage"
-	} else if msg, err := managePullRequest(inputEvent.GitPromotion.Repository, inputEvent.Stage, nextStage, accessToken, buildTitle(shkeptncontext, nextStage), buildBody(shkeptncontext, inputEvent.Project, inputEvent.Service, inputEvent.Stage)); err != nil {
-		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Errorf("handleGitPromotionTriggeredEvent: could not open pull request on repository %s", inputEvent.GitPromotion.Repository)
-		status = keptnv2.StatusErrored
-		result = keptnv2.ResultFailed
-		message = "error while opening pull request"
+	} else if *config.Spec.Strategy == strategyBranch {
+		status, result, message, prLink = handleBranchStrategy(inputEvent, config, shkeptncontext, nextStage, accessToken)
+	} else if *config.Spec.Strategy == strategyFlatPR {
+		status, result, message, prLink = handleFlatPRStrategy(event, inputEvent, config, accessToken, shkeptncontext, nextStage)
 	} else {
-		status = keptnv2.StatusSucceeded
-		result = keptnv2.ResultPass
-		message = msg
+		status = keptnv2.StatusErrored
+		result = keptnv2.ResultFailed
+		message = "unimplemented strategy"
 	}
-	finishedEvent := a.getGitPromotionFinishedEvent(inputEvent, status, result, message, triggeredID, shkeptncontext)
+	finishedEvent := a.getGitPromotionFinishedEvent(inputEvent, status, result, message, triggeredID, shkeptncontext, prLink)
 	outgoingEvents = append(outgoingEvents, *finishedEvent)
 	return outgoingEvents
+}
+
+func handleFlatPRStrategy(event cloudevents.Event, inputEvent GitPromotionTriggeredEventData, config model.PromotionConfig, accessToken, shkeptncontext, nextStage string) (status keptnv2.StatusType, result keptnv2.ResultType, message string, prLink *string) {
+	if msg, prlink, err := manageFlatPRStrategy(*config.Spec.Target.Repo, accessToken, replacer.ConvertToMap(event), "main",
+		buildBranchName(inputEvent.Stage, nextStage, shkeptncontext),
+		buildTitle(shkeptncontext, nextStage),
+		buildBody(shkeptncontext, inputEvent.Project, inputEvent.Service, inputEvent.Stage), config.Spec.Paths); err != nil {
+		logger.WithField("func", "handleFlatPRStrategy").WithError(err).Errorf("flat pr strategy failed on repository %s", *config.Spec.Target.Repo)
+		return keptnv2.StatusErrored, keptnv2.ResultFailed, "error while opening pull request", nil
+	} else {
+		return keptnv2.StatusSucceeded, keptnv2.ResultPass, msg, prlink
+	}
+}
+
+func handleBranchStrategy(inputEvent GitPromotionTriggeredEventData, config model.PromotionConfig, shkeptncontext, nextStage, accessToken string) (status keptnv2.StatusType, result keptnv2.ResultType, message string, prLink *string) {
+	if msg, prLink, err := manageBranchStrategy(*config.Spec.Target.Repo, inputEvent.Stage, nextStage, accessToken, buildTitle(shkeptncontext, nextStage), buildBody(shkeptncontext, inputEvent.Project, inputEvent.Service, inputEvent.Stage)); err != nil {
+		logger.WithField("func", "handleBranchStrategy").WithError(err).Errorf("branch strategy failed on repository %s", *config.Spec.Target.Repo)
+		return keptnv2.StatusErrored, keptnv2.ResultFailed, "error while opening pull request", nil
+	} else {
+		return keptnv2.StatusSucceeded, keptnv2.ResultPass, msg, prLink
+	}
+}
+
+func manageFlatPRStrategy(repositoryUrl, accessToken string, fields map[string]string, sourceBranch, targetBranch, title, body string, paths []model.Path) (message string, prLink *string, err error) {
+	logger.WithField("func", "manageFlatPRStrategy").Infof("starting flat pr strategy with sourceBranch %s and targetBranch %s and fields %v", sourceBranch, targetBranch, fields)
+	if client, err := repoaccess.NewClient(accessToken, repositoryUrl); err != nil {
+		return "", nil, err
+	} else {
+		if exists, err := client.BranchExists(targetBranch); err != nil {
+			return "", nil, err
+		} else if exists {
+			return "", nil, errors.New(fmt.Sprintf("branch with name %s already exists", targetBranch))
+		}
+		if err := client.CreateBranch(sourceBranch, targetBranch); err != nil {
+			return "", nil, err
+		}
+		changes := 0
+		logger.WithField("func", "manageFlatPRStrategy").Infof("processing %d paths", len(paths))
+		for _, p := range paths {
+			var path string
+			if p.Source == nil {
+				path = *p.Target
+			} else {
+				path = *p.Source
+			}
+			pNewTargetFiles, err := client.GetFilesForBranch(sourceBranch, path)
+			if err != nil {
+				return "", nil, err
+			}
+			var pCurrentTargetFiles []repoaccess.RepositoryFile
+			if p.Source != nil {
+				if pCurrentTargetFiles, err = client.GetFilesForBranch(sourceBranch, *p.Target); err != nil {
+					return "", nil, err
+				}
+			} else {
+				pCurrentTargetFiles = pNewTargetFiles
+			}
+			for i, c := range pNewTargetFiles {
+				pNewTargetFiles[i].Content = replacer.Replace(c.Content, fields)
+				if p.Source != nil {
+					pNewTargetFiles[i].Path = strings.Replace(pNewTargetFiles[i].Path, *p.Source, *p.Target, -1)
+				}
+			}
+			if checkForChanges(pNewTargetFiles, pCurrentTargetFiles) {
+				if pathChanges, err := client.SyncFilesWithBranch(targetBranch, pCurrentTargetFiles, pNewTargetFiles); err != nil {
+					return "", nil, err
+				} else {
+					changes += pathChanges
+				}
+			} else {
+				logger.WithField("func", "manageFlatPRStrategy").Info("no changes detected, doing nothing")
+				return "no changes detected", nil, nil
+			}
+		}
+		logger.WithField("func", "manageFlatPRStrategy").Infof("commited %d changes to branch %s", changes, targetBranch)
+		if changes > 0 {
+			if pr, err := client.CreatePullRequest(targetBranch, sourceBranch, title, body); err != nil {
+				return "", nil, err
+			} else {
+				logger.WithField("func", "manageFlatPRStrategy").Infof("opened pull request %d in repo %s from branch %s to %s", pr.Number, repositoryUrl, sourceBranch, targetBranch)
+				return "opened pull request", &pr.URL, nil
+			}
+		} else {
+			logger.WithField("func", "manageFlatPRStrategy").Infof("no changes found, deleting branch %s", targetBranch)
+			if err := client.DeleteBranch(targetBranch); err != nil {
+				return "", nil, err
+			} else {
+				return "no changes found => no pull request necessary", nil, nil
+			}
+		}
+	}
+}
+
+func checkForChanges(files []repoaccess.RepositoryFile, files2 []repoaccess.RepositoryFile) bool {
+	if len(files) != len(files2) {
+		return true
+	}
+	tempmap := make(map[string]repoaccess.RepositoryFile)
+	for _, f := range files {
+		tempmap[f.Path] = f
+	}
+	for _, f2 := range files2 {
+		if f, ok := tempmap[f2.Path]; !ok {
+			return true
+		} else if f.Content != f2.Content {
+			return true
+		}
+	}
+	return false
+}
+
+func manageBranchStrategy(repositoryUrl, fromBranch, toBranch, accessToken, title, body string) (message string, prLink *string, err error) {
+	if client, err := repoaccess.NewClient(accessToken, repositoryUrl); err != nil {
+		return "", nil, err
+	} else if newCommits, err := client.CheckForNewCommits(toBranch, fromBranch); err != nil {
+		return "", nil, err
+	} else if !newCommits {
+		logger.WithField("func", "manageBranchStrategy").Infof("no difference found in repo %s from branch %s to %s", repositoryUrl, fromBranch, toBranch)
+		return fmt.Sprintf("no difference between branches %s and %s found => nothing todo", fromBranch, toBranch), nil, nil
+	} else if pr, err := client.GetOpenPullRequest(fromBranch, toBranch); err != nil {
+		return "", nil, err
+	} else if pr != nil {
+		logger.WithField("func", "manageBranchStrategy").Infof("pull request in repo %s from branch %s to %s already open with id %d and title %s", repositoryUrl, fromBranch, toBranch, pr.Number, pr.Title)
+		if strings.HasPrefix(pr.Title, keptnPullRequestTitlePrefix) {
+			if err := client.EditPullRequest(pr, title, body); err != nil {
+				return "", nil, err
+			}
+			logger.WithField("func", "manageBranchStrategy").Infof("updated pull request %d in repo %s from branch %s to %s", pr.Number, repositoryUrl, fromBranch, toBranch)
+			return "updated pull request", &pr.URL, nil
+		} else {
+			return "unmanaged pull request already open", &pr.URL, nil
+		}
+	} else {
+		pr, err := client.CreatePullRequest(fromBranch, toBranch, title, body)
+		if err != nil {
+			return message, nil, err
+		}
+		logger.WithField("func", "manageBranchStrategy").Infof("opened pull request %d in repo %s from branch %s to %s", pr.Number, repositoryUrl, fromBranch, toBranch)
+		return "opened pull request", &pr.URL, nil
+	}
+}
+
+func validateConfig(config model.PromotionConfig) (validationErrrors []string) {
+	if config.Spec.Strategy == nil || *config.Spec.Strategy == "" {
+		validationErrrors = append(validationErrrors, `"spec.strategy" missing`)
+	} else if *config.Spec.Strategy != strategyBranch && *config.Spec.Strategy != strategyFlatPR {
+		validationErrrors = append(validationErrrors, fmt.Sprintf(`"spec.strategy" %s invalid`, *config.Spec.Strategy))
+	}
+	if config.Spec.Target.Secret == nil || *config.Spec.Target.Secret == "" {
+		validationErrrors = append(validationErrrors, `"target.secret" missing`)
+	}
+	if config.Spec.Target.Provider == nil || *config.Spec.Target.Provider == "" {
+		validationErrrors = append(validationErrrors, `"target.platform" missing`)
+	} else if *config.Spec.Target.Provider != "github" {
+		validationErrrors = append(validationErrrors, `target.platform not supported`)
+	}
+	if config.Spec.Target.Repo == nil || *config.Spec.Target.Repo == "" {
+		validationErrrors = append(validationErrrors, `"target.repository" missing`)
+	} else {
+		u, err := url.Parse(*config.Spec.Target.Repo)
+		if err != nil {
+			validationErrrors = append(validationErrrors, `"target.repository" is not a valid URL`)
+		} else {
+			if u.Scheme != "https" || u.Host != "github.com" {
+				validationErrrors = append(validationErrrors, `"target.repository" must be a "https" url to a repository on github.com`)
+			} else if matched, err := regexp.MatchString(githubPathRegexp, u.Path); err != nil || !matched {
+				validationErrrors = append(validationErrrors, `"target.repository" must be a "https" url to a repository on github.com`)
+			}
+		}
+	}
+	if config.Spec.Strategy != nil && *config.Spec.Strategy == strategyBranch && len(config.Spec.Paths) > 0 {
+		validationErrrors = append(validationErrrors, `no "paths" supported for branch strategy`)
+	}
+	if config.Spec.Strategy != nil && *config.Spec.Strategy == strategyFlatPR && len(config.Spec.Paths) == 0 {
+		validationErrrors = append(validationErrrors, `at least one path is necessary for strategy flat-pr`)
+	}
+	for i, p := range config.Spec.Paths {
+		if p.Target == nil || *p.Target == "" {
+			validationErrrors = append(validationErrrors, fmt.Sprintf(`"paths[%d].target" is missing`, i))
+		} else {
+			//check for targets containing each other (e.g. one target /dev/hello and another /dev/hello/Chart.yaml
+			// => this would lead to multiple copy/template operations and errors and is anywayys an inconsistent defininion
+			for d, p2 := range config.Spec.Paths {
+				if p2.Target != nil && i != d && strings.HasPrefix(*p.Target, *p2.Target) {
+					validationErrrors = append(validationErrrors, fmt.Sprintf("paths[%d].target is already included in paths[%d].target", i, d))
+				}
+			}
+		}
+		if p.Source != nil && *p.Source == *p.Target {
+			validationErrrors = append(validationErrrors, fmt.Sprintf(`"paths[%d].source" is same as target`, i))
+		}
+	}
+	logger.WithField("func", "validateInputEvent").Infof("validation finished with %d validation errors", len(validationErrrors))
+	return validationErrrors
 }
 
 func buildTitle(keptncontext, nextStage string) string {
@@ -111,68 +310,8 @@ Service: *%s*
 Stage: *%s*`, keptncontext, os.Getenv("EXTERNAL_URL"), projectName, keptncontext, stage, projectName, serviceName, stage)
 }
 
-func managePullRequest(repositoryUrl, fromBranch, toBranch, accessToken, title, body string) (message string, err error) {
-	owner, repo, err := getGithubOwnerRepository(repositoryUrl)
-	if err != nil {
-		return message, err
-	}
-	ctx := context.Background()
-	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: accessToken},
-	)
-	tc := oauth2.NewClient(ctx, ts)
-	client := github.NewClient(tc)
-	compare, _, err := client.Repositories.CompareCommits(ctx, owner, repo, toBranch, fromBranch)
-	if err != nil {
-		return message, err
-	}
-	if len(compare.Commits) == 0 {
-		logger.WithField("func", "managePullRequest").Infof("no difference found in repo %s from branch %s to %s", repositoryUrl, fromBranch, toBranch)
-		return fmt.Sprintf("no difference between branches %s and %s found => nothing todo", fromBranch, toBranch), nil
-	}
-	pull, _, err := client.PullRequests.List(ctx, owner, repo, &github.PullRequestListOptions{
-		Head: fromBranch,
-		Base: toBranch,
-	})
-	if err != nil {
-		return message, err
-	}
-	if len(pull) > 0 {
-		logger.WithField("func", "managePullRequest").Infof("pull request in repo %s from branch %s to %s already open with id %d and title %s", repositoryUrl, fromBranch, toBranch, *pull[0].Number, *pull[0].Title)
-		if strings.HasPrefix(*pull[0].Title, keptnPullRequestTitlePrefix) {
-			if _, _, err := client.PullRequests.Edit(ctx, owner, repo, *pull[0].Number, &github.PullRequest{
-				Title: &title,
-				Body:  &body,
-			}); err != nil {
-				return message, err
-			}
-			logger.WithField("func", "managePullRequest").Infof("updated pull request %d in repo %s from branch %s to %s", *pull[0].Number, repositoryUrl, fromBranch, toBranch)
-			return fmt.Sprintf("updated pull request %s", *pull[0].HTMLURL), nil
-		} else {
-			return fmt.Sprintf("unmanaged pull request already open: %s", *pull[0].HTMLURL), nil
-		}
-	} else {
-		pr, _, err := client.PullRequests.Create(ctx, owner, repo, &github.NewPullRequest{
-			Title: &title,
-			Head:  &fromBranch,
-			Base:  &toBranch,
-			Body:  &body,
-		})
-		if err != nil {
-			return message, err
-		}
-		logger.WithField("func", "managePullRequest").Infof("opened pull request %d in repo %s from branch %s to %s", *pr.Number, repositoryUrl, fromBranch, toBranch)
-		return fmt.Sprintf("opened pull request %s", *pr.HTMLURL), nil
-	}
-}
-
-func getGithubOwnerRepository(raw string) (owner, repository string, err error) {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return owner, repository, err
-	}
-	splittedUrl := strings.Split(u.Path, "/")
-	return splittedUrl[1], splittedUrl[2], nil
+func buildBranchName(stage string, nextStage string, shkeptncontext string) string {
+	return fmt.Sprintf("promote/%s_%s-%s", stage, nextStage, shkeptncontext)
 }
 
 func (a *GitPromotionTriggeredEventHandler) getGitPromotionStartedEvent(inputEvent GitPromotionTriggeredEventData, triggeredID, shkeptncontext string) *cloudevents.Event {
@@ -188,12 +327,16 @@ func (a *GitPromotionTriggeredEventHandler) getGitPromotionStartedEvent(inputEve
 }
 
 func (a *GitPromotionTriggeredEventHandler) getGitPromotionFinishedEvent(inputEvent GitPromotionTriggeredEventData,
-	status keptnv2.StatusType, result keptnv2.ResultType, message string, triggeredID, shkeptncontext string) *cloudevents.Event {
+	status keptnv2.StatusType, result keptnv2.ResultType, message string, triggeredID, shkeptncontext string, prLink *string) *cloudevents.Event {
+	labels := inputEvent.Labels
+	if prLink != nil {
+		labels["pullrequest"] = *prLink
+	}
 	gitPromotionFinishedEvent := keptnv2.EventData{
 		Project: inputEvent.Project,
 		Stage:   inputEvent.Stage,
 		Service: inputEvent.Service,
-		Labels:  inputEvent.Labels,
+		Labels:  labels,
 		Status:  status,
 		Result:  result,
 		Message: message,
@@ -201,37 +344,8 @@ func (a *GitPromotionTriggeredEventHandler) getGitPromotionFinishedEvent(inputEv
 	return getCloudEvent(gitPromotionFinishedEvent, keptnv2.GetFinishedEventType(GitPromotionTaskName), shkeptncontext, triggeredID)
 }
 
-func validateInputEvent(inputEvent GitPromotionTriggeredEventData) (validationErrrors []string) {
-	if inputEvent.GitPromotion.Strategy == "" {
-		validationErrrors = append(validationErrrors, `"strategy" missing`)
-	} else if inputEvent.GitPromotion.Strategy != "branches" {
-		validationErrrors = append(validationErrrors, `"strategy" invalid`)
-	}
-	if inputEvent.GitPromotion.SecretName == "" {
-		validationErrrors = append(validationErrrors, `"secretname" missing`)
-	}
-	if inputEvent.GitPromotion.Repository == "" {
-		validationErrrors = append(validationErrrors, `"repository" missing`)
-	} else {
-		u, err := url.Parse(inputEvent.GitPromotion.Repository)
-		if err != nil {
-			validationErrrors = append(validationErrrors, `"repository" is not a valid URL`)
-		} else {
-			if u.Scheme != "https" || u.Host != "github.com" {
-				validationErrrors = append(validationErrrors, `"repository" must be a "https" url to a repository on github.com`)
-			} else if matched, err := regexp.MatchString(githubPathRegexp, u.Path); err != nil || !matched {
-				validationErrrors = append(validationErrrors, `"repository" must be a "https" url to a repository on github.com`)
-			}
-		}
-	}
-	logger.WithField("func", "validateInputEvent").Infof("validation for %s/%s/%s finished with %d validation errors", inputEvent.Project, inputEvent.Stage, inputEvent.Service, len(validationErrrors))
-	return validationErrrors
-}
-
-func getAccessToken(secretName string) (accessToken string, err error) {
-	if client, err := createKubeAPI(); err != nil {
-		return accessToken, err
-	} else if secret, err := client.CoreV1().Secrets(os.Getenv("K8S_NAMESPACE")).Get(context.Background(), secretName, v1.GetOptions{}); err != nil {
+func (a *GitPromotionTriggeredEventHandler) getAccessToken(secretName string) (accessToken string, err error) {
+	if secret, err := a.kubeClient.CoreV1().Secrets(os.Getenv("K8S_NAMESPACE")).Get(context.Background(), secretName, v1.GetOptions{}); err != nil {
 		return accessToken, err
 	} else {
 		logger.WithField("func", "getAccessToken").Infof("found access-token with length %d in secret %s", len(secret.Data["access-token"]), secret.Name)
@@ -239,26 +353,8 @@ func getAccessToken(secretName string) (accessToken string, err error) {
 	}
 }
 
-func createKubeAPI() (*kubernetes.Clientset, error) {
-	var config *rest.Config
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, err
-	}
-	kubeAPI, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, err
-	}
-	return kubeAPI, nil
-}
-
-func getNextStage(project string, stage string) (nextStage string, err error) {
-	apiSet, err := api.New(os.Getenv("API_BASE_URL"), api.WithAuthToken(os.Getenv("API_AUTH_TOKEN")))
-	if err != nil {
-		logger.WithField("func", "getNextStage").WithError(err).Errorf("could not get apiSet for project %s with stage %s", project, stage)
-		return nextStage, err
-	}
-	stages, err := apiSet.StagesV1().GetAllStages(project)
+func (a *GitPromotionTriggeredEventHandler) getNextStage(project string, stage string) (nextStage string, err error) {
+	stages, err := a.api.StagesV1().GetAllStages(project)
 	if err != nil {
 		logger.WithField("func", "getNextStage").WithError(err).Errorf("could not get all stages for project %s with stage %s", project, stage)
 		return nextStage, err
@@ -277,4 +373,79 @@ func getNextStage(project string, stage string) (nextStage string, err error) {
 	err = errors.New(fmt.Sprintf("stage %s not found", stage))
 	logger.WithField("func", "getNextStage").WithError(err).Errorf("stage %s not found for project %s", stage, project)
 	return nextStage, err
+}
+
+func (a *GitPromotionTriggeredEventHandler) getMergedConfiguration(project string, stage, nextstage string, service string) (config model.PromotionConfig) {
+	config = readAndMergeResource(config, func() (resource *models.Resource, err error) {
+		return a.api.ResourcesV1().GetProjectResource(project, configurationResource)
+	})
+	config = readAndMergeResource(config, func() (resource *models.Resource, err error) {
+		return a.api.ResourcesV1().GetStageResource(project, stage, configurationResource)
+	})
+	config = readAndMergeResource(config, func() (resource *models.Resource, err error) {
+		return a.api.ResourcesV1().GetServiceResource(project, stage, service, configurationResource)
+	})
+
+	placeholders := map[string]string{
+		"project":   project,
+		"stage":     stage,
+		"nextstage": nextstage,
+		"service":   service,
+	}
+
+	config.Spec.Target.Repo = replacePlaceHolders(placeholders, config.Spec.Target.Repo)
+	config.Spec.Target.Secret = replacePlaceHolders(placeholders, config.Spec.Target.Secret)
+	for i, p := range config.Spec.Paths {
+		p.Target = replacePlaceHolders(placeholders, p.Target)
+		p.Source = replacePlaceHolders(placeholders, p.Source)
+		config.Spec.Paths[i] = p
+	}
+	return config
+}
+
+func replacePlaceHolders(placeholders map[string]string, p *string) (result *string) {
+	if p == nil {
+		return nil
+	}
+	current := *p
+	for k, v := range placeholders {
+		current = strings.Replace(current, fmt.Sprintf("${%s}", k), v, -1)
+	}
+	return &current
+}
+
+func readAndMergeResource(target model.PromotionConfig, getResourceFunc func() (resource *models.Resource, err error)) (ret model.PromotionConfig) {
+	ret = target
+	resource, err := getResourceFunc()
+	if err == api.ResourceNotFoundError {
+		return ret
+	}
+	var newConfig model.PromotionConfig
+	if err := yaml.Unmarshal([]byte(resource.ResourceContent), &newConfig); err != nil {
+		logger.WithField("func", "readAndMergeResource").
+			WithError(err).
+			Errorf("could not unmarshall resource file %s => ignoring", *resource.ResourceURI)
+	} else {
+		if newConfig.Spec.Strategy != nil {
+			ret.Spec.Strategy = newConfig.Spec.Strategy
+		}
+		if newConfig.Spec.Target.Repo != nil {
+			ret.Spec.Target.Repo = newConfig.Spec.Target.Repo
+		}
+		if newConfig.Spec.Target.Secret != nil {
+			ret.Spec.Target.Secret = newConfig.Spec.Target.Secret
+		}
+		if newConfig.Spec.Target.Provider != nil {
+			ret.Spec.Target.Provider = newConfig.Spec.Target.Provider
+		}
+		ret.Spec.Paths = append(target.Spec.Paths, newConfig.Spec.Paths...)
+	}
+	return ret
+}
+
+func toString(str *string) string {
+	if str == nil {
+		return "<nil>"
+	}
+	return *str
 }

@@ -32,7 +32,9 @@ helm template \
 keptn trigger delivery --project=temp-project --service=temp-service --stage=dev --image=test --tag=1.1
 ```
 
-## shipyard.yaml
+# Configuration
+
+## `shipyard.yaml`
 
 #### Sequence Definition Sample
 
@@ -41,29 +43,148 @@ keptn trigger delivery --project=temp-project --service=temp-service --stage=dev
   triggeredOn:
     - event: "dev.evaluation.finished"
   tasks:
-    - name: "git-promotion"
-      properties:
-        repository: "https://github.com/markuslackner/keptn-argo-dev"
-        secretname: "my-github-secret"
-        strategy: "branches"
+    - name: "git-promotion"      
 ```
 
-#### Properties
+## `git-promotion.yaml`
 
-| Property | Description | Sample |
-| -------- | ----------- | ------ |
-| repository | Repository URL (`https`) | https://github.com/markuslackner/keptn-argo-dev |
-| secretname | Secretname for github token | testsecret |
-| strategy | Promotion strategy | branches |
+### Sample
+
+```yaml
+
+apiVersion: keptn.sh/v1
+kind: GitPromotionConfig
+metadata:
+  name: ${project}-${service}-${stage}
+spec:
+  strategy: flat-pr
+  target:
+    repo: https://github.com/test/gke-${project}-${service}
+    secret: gke-${project}
+    provider: github
+  paths:
+    - target: ${stage}
+```
+
+#### Available Placeholders
+
+This placeholders can be used in `promotion-config.yaml` with `${<name>}` syntax.
+
+| Name        | Description   |
+|-------------|---------------|
+| `project`   | project name  |
+| `service`   | service name  |
+| `stage`     | current stage |
+| `nextstage` | next stage    |
+
+#### Configuration description
+
+| Property             | Description                                                              | Sample                                            |
+|----------------------|--------------------------------------------------------------------------|---------------------------------------------------|
+| apiVersion           | API Version                                                              | `keptn.sh/v1`                                     |
+| kind                 | Name of type                                                             | `GitPromotionConfig`                              |
+| metadata.name        | Resource name                                                            | `${project}-${service}-${stage}`                  |
+| spec.strategy        | Strategy to use (`branch` or `flat-pr`)                                  | `branch`                                          |
+| spec.target.repo     | Target Repository                                                        | https://github.com/test/gke-${project}-${service} |
+| spec.target.secret   | Secretname for token                                                     | `testsecret`                                      |
+| spec.target.provider | Name of the provider                                                     | `github`                                          |
+| spec.[]paths         | Paths for sync/modification. Only allowed with `spec.strategy` *flat-pr* |                                                   |
+| spec.[]paths.target  | Folder to process (replace contents with placeholders)                   | `${nextstage}`                                    |
+| spec.[]paths.source  | Folder to sync contents from (optional)                                  | `${stage}`                                        |
 
 #### Strategies
 
-##### branches
+##### `branch`
 
 For every stage there **must** be a corresponding branch in the git repository. A *Pull Request* will be opened when
 
 * there are new commits in the current stage that are not in the next stage
 * there is not already an open *Pull Request* with the same source and target branches
+
+#### `flat-pr`
+
+A new *PullRequest* with base branch `main` and branch name `promote/<source-stage>_<target-stage>` is opened for promotion. In the 
+configuration multiple paths (at least one) can be defined. 
+
+There are two possibilities:
+
+* `source` is empty => All files in `target` are templated
+* `source` and `target` are available => All files will be synced form source to target and the target folder ist templated afterwards.
+
+
+###### Placeholder replacements in files
+
+All files in *target* path are processed and placeholders are replaced. All values of the processed *cloud event* can be accessed and used in the files.
+The values must be annotated with a comment:
+
+**Example:**
+```yaml
+test: default # {"keptn.git-promotion.replacewith":"shkeptncontext"}
+```
+In this example `default` will be replaced with the `keptncontext` in the cloud event. All data is accessible within the hierarchy through separating the names with a *dot*.
+
+Example cloud event:
+
+```json
+{
+  "data": {
+    "evaluation": {
+      "gitCommit": "",
+      "indicatorResults": null,
+      "result": "pass",
+      "score": 0,
+      "sloFileContent": "",
+      "timeEnd": "2022-05-17T12:39:29.387Z",
+      "timeStart": "2022-05-17T12:34:29.387Z",
+      "timeframe": "5m"
+    },
+    "message": "",
+    "project": "git-promotion-test-prj",
+    "result": "pass",
+    "service": "my-test-service",
+    "stage": "dev",
+    "status": "succeeded"
+  },
+  "gitcommitid": "27b9e0b3c8f440200b3a799cf8e54b25c2ae4502",
+  "id": "9db333ce-5b16-4f4e-9036-6e61c5ec4c00",
+  "shkeptncontext": "b30f2864-116a-45f5-90df-75fe05e580a3",
+  "shkeptnspecversion": "latest",
+  "source": "shipyard-controller",
+  "specversion": "1.0",
+  "time": "2022-05-17T12:39:34.907Z",
+  "type": "sh.keptn.event.git-promotion.triggered"
+}
+```
+Some sample values:
+
+| Placeholder            | Content                                   |
+|------------------------|-------------------------------------------|
+| data.evaluation.result | pass                                      |
+| gitcommitid            | 27b9e0b3c8f440200b3a799cf8e54b25c2ae4502  |
+| data.status            | pass                                      |
+
+####### Known Limitations
+
+* The placeholder mechanism can only handle *string* and *int* json values at the moment. Arrays and float will most probably lead to problems
+* The annotation has to be formatted **exactly** as shown in the sample. Additional spaces or missing " - although probably ok from a json/yaml point of view - will lead to problems.
+
+###### Sample Configuration
+
+```yaml
+apiVersion: keptn.sh/v1
+kind: GitPromotionConfig
+metadata:
+  name: ${project}-${service}-${stage}
+spec:
+  strategy: flat-pr
+  target:
+    repo: https://github.com/markuslackner/gke-${project}-${service}
+    secret: gke-${project}
+    provider: github
+  paths:
+    - source: ${stage}  
+      target: ${nextstage}
+```
 
 #### Secret for github token
 
@@ -80,14 +201,32 @@ stringData:
   access-token: xxxxxxxxxxxxxxxxx
 ```
 
-# ToDos / Remark
+# Testevent
 
-* new strategies like `folder` or `patch` should be defined and implemented
-* Test needed for scope for github token (minimal needed scope)
-* Cache kubernetes client and maybe github client (implement proper backend)
-* consolidate error handling and messages with other services (keptn status and keptn result) 
-* Define repository and secret in a different place (service and/or project level?, event input?) and not in promotion task properties. 
-* Implement unit tests
-* Implement approve
-* Implement bitbucket and gitlab apis
-* migrate from distributor sidecar to library
+```json
+{
+  "data": {
+    "project": "test-git-promotion",
+    "service": "my-test-service",
+    "stage": "dev"
+  },
+  "shkeptnspecversion": "0.2.4",
+  "source": "curl",
+  "specversion": "1.0",
+  "type": "sh.keptn.event.dev.evaluation.triggered"
+}
+```
+
+```bash
+curl -H "accept: application/json" -H "content-type: application/json" -H "x-token: xxxxxxxxx" -d '{
+"data": {
+"project": "test-git-promotion",
+"service": "my-test-service",
+"stage": "dev"
+},
+"shkeptnspecversion": "0.2.4",
+"source": "curl",
+"specversion": "1.0",
+"type": "sh.keptn.event.dev.evaluation.triggered"
+}' http://localhost:8080/api/event
+``` 
