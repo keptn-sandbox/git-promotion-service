@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"keptn/git-promotion-service/pkg/handler"
 	"log"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"github.com/kelseyhightower/envconfig"
 	logger "github.com/sirupsen/logrus"
 
+	api "github.com/keptn/go-utils/pkg/api/utils"
 	keptnapi "github.com/keptn/go-utils/pkg/api/utils"
 	keptncommon "github.com/keptn/go-utils/pkg/lib/keptn"
 	keptnv2 "github.com/keptn/go-utils/pkg/lib/v0_2_0"
@@ -90,14 +93,30 @@ func switchEvent(ctx context.Context, event cloudevents.Event) {
 		}
 	}()
 	keptnHandlerV2, err := keptnv2.NewKeptn(&event, keptncommon.KeptnOpts{})
-
 	if err != nil {
 		logger.WithError(err).Error("failed to initialize Keptn handler")
 		return
 	}
 
+	apiSet, err := api.New(os.Getenv("API_BASE_URL"), api.WithAuthToken(os.Getenv("API_AUTH_TOKEN")))
+	if err != nil {
+		logger.WithError(err).Error("failed to initialize API Set")
+		return
+	}
+
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		logger.WithError(err).Error("failed to initialize kube client rest")
+		return
+	}
+	kubeAPI, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		logger.WithError(err).Error("failed to initialize kube client config")
+		return
+	}
+
 	handlers := []handler.Handler{
-		handler.NewGitPromotionTriggeredEventHandler(keptnHandlerV2),
+		handler.NewGitPromotionTriggeredEventHandler(keptnHandlerV2, apiSet, kubeAPI),
 	}
 
 	unhandled := true
