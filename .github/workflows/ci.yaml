@@ -2,9 +2,6 @@ name: CI
 on:
   workflow_dispatch:
   push: {}
-  create:
-    tag:
-      - '*'
 
 jobs:
   version:
@@ -16,7 +13,7 @@ jobs:
       - name: Please release
         id: please-release
         uses: google-github-actions/release-please-action@v3
-        if: github.ref == 'ref/head/main'
+        if: ${{ github.ref == 'refs/heads/main' }}
         with:
           release-type: go
           package-name: release-please-action
@@ -24,7 +21,7 @@ jobs:
       - name: Get current version
         id: current-version
         run: |
-          if [[ "$GITHUB_REF" == "ref/head/main" ]]
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]
           then
             if [[ "${{ steps.please-release.outputs.release_created }}" == "true" ]]
             then
@@ -62,6 +59,7 @@ jobs:
 
       - name: Login to Github Container Registry
         uses: docker/login-action@v1
+        if: ${{ needs.version.outputs.release == 'true' }}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
