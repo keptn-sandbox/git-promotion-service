@@ -1,4 +1,4 @@
 apiVersion: v2
 name: git-promotion-service-chart
-version: 0.0.1
+version: 0.0.0
 
