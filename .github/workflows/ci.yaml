@@ -2,11 +2,54 @@ name: CI
 on:
   workflow_dispatch:
   push: {}
+  create:
+    tag:
+      - '*'
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      current-version: ${{ steps.current-version.outputs.version }}
+      release: ${{ steps.current-version.outputs.release }}
+    steps:
+      - name: Please release
+        id: please-release
+        uses: google-github-actions/release-please-action@v3
+        if: github.ref == 'ref/head/main'
+        with:
+          release-type: go
+          package-name: release-please-action
+
+      - name: Get current version
+        id: current-version
+        run: |
+          if [[ "$GITHUB_REF" == "ref/head/main" ]]
+          then
+            if [[ "${{ steps.please-release.outputs.release_created }}" == "true" ]]
+            then
+              echo "release please created a release ${{ steps.please-release.outputs.tag_name }}"
+              version=${{ steps.please-release.outputs.tag_name }}
+              release="true"
+            else
+              echo "running on main branch but release please has not created a release"
+              version="0.0.0"
+              release="false"
+            fi             
+          else
+            suffix=$(echo $GITHUB_REF_NAME  | tr '[:upper:]' '[:lower:]' | sed -e 's/[\/_]/-/g')
+            release="false"
+            version="0.0.0-$suffix"
+          fi 
+          echo "Using version $version and release $release"
+          echo "::set-output name=version::$version"
+          echo "::set-output name=release::$release"       
+
   docker-build:
     runs-on: ubuntu-latest
     name: BuildX Docker Build
+    needs:
+      - version
     permissions:
       packages: write
       contents: read
@@ -36,8 +79,8 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: .
-          push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          push: ${{ needs.version.outputs.release }}
+          tags: ghcr.io/${{ github.repository }}:${{ needs.version.outputs.current-version }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new
 
@@ -49,6 +92,8 @@ jobs:
   helm-build:
     runs-on: ubuntu-latest
     name: Helm Build
+    needs:
+      - version
     permissions:
       packages: write
       contents: read
@@ -56,14 +101,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: Helm Build Chart
-        run: |
-          helm package chart
+      - name: Helm package
+        run: |          
+          helm package chart --version ${{ needs.version.outputs.current-version }}
 
-      - name: Helm Login
+      - name: Helm login
+        if: ${{ needs.version.outputs.release == 'true' }}
         run: |
           helm registry login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
 
       - name: Helm Push to registry
+        if: ${{ needs.version.outputs.release == 'true' }}
         run: |
-          helm push git-promotion-service-chart-0.0.1.tgz oci://ghcr.io/${{ github.repository_owner }}
+          helm push git-promotion-service-chart-${{ needs.version.outputs.current-version }}.tgz oci://ghcr.io/${{ github.repository_owner }}
