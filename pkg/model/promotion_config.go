@@ -1,5 +1,14 @@
 package model
 
+type PromotionConfigValidator interface {
+	Validate(config PromotionConfig) (validationErrors []string)
+}
+
+const (
+	StrategyBranch string = "branch"
+	StrategyFlatPR        = "flat-pr"
+)
+
 type PromotionConfig struct {
 	APIVersion *string             `yaml:"apiVersion"`
 	Kind       *string             `yaml:"kind"`
