@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	promotionconfig "keptn/git-promotion-service/pkg/config"
 	"keptn/git-promotion-service/pkg/model"
+	"keptn/git-promotion-service/pkg/promoter"
 	"keptn/git-promotion-service/pkg/replacer"
 	"keptn/git-promotion-service/pkg/repoaccess"
 	"os"
@@ -86,10 +87,15 @@ func (a *GitPromotionTriggeredEventHandler) handleGitPromotionTriggeredEvent(eve
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
 		message = "error while reading secret"
+	} else if client, err := repoaccess.NewClient(accessToken, *config.Spec.Target.Repo); err != nil {
+		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Errorf("handleGitPromotionTriggeredEvent: error while creating client for repo")
+		status = keptnv2.StatusErrored
+		result = keptnv2.ResultFailed
+		message = "error while reading secret"
 	} else if *config.Spec.Strategy == model.StrategyBranch {
-		status, result, message, prLink = handleBranchStrategy(inputEvent, config, shkeptncontext, nextStage, accessToken)
+		status, result, message, prLink = handleBranchStrategy(client, inputEvent, config, shkeptncontext, nextStage)
 	} else if *config.Spec.Strategy == model.StrategyFlatPR {
-		status, result, message, prLink = handleFlatPRStrategy(event, inputEvent, config, accessToken, shkeptncontext, nextStage)
+		status, result, message, prLink = handleFlatPRStrategy(client, event, inputEvent, config, shkeptncontext, nextStage)
 	} else {
 		status = keptnv2.StatusErrored
 		result = keptnv2.ResultFailed
@@ -100,8 +106,9 @@ func (a *GitPromotionTriggeredEventHandler) handleGitPromotionTriggeredEvent(eve
 	return outgoingEvents
 }
 
-func handleFlatPRStrategy(event cloudevents.Event, inputEvent GitPromotionTriggeredEventData, config model.PromotionConfig, accessToken, shkeptncontext, nextStage string) (status keptnv2.StatusType, result keptnv2.ResultType, message string, prLink *string) {
-	if msg, prlink, err := manageFlatPRStrategy(*config.Spec.Target.Repo, accessToken, replacer.ConvertToMap(event), "main",
+func handleFlatPRStrategy(client repoaccess.Client, event cloudevents.Event, inputEvent GitPromotionTriggeredEventData, config model.PromotionConfig, shkeptncontext, nextStage string) (status keptnv2.StatusType, result keptnv2.ResultType, message string, prLink *string) {
+	p := promoter.NewFlatPrPromoter(client)
+	if msg, prlink, err := p.Promote(*config.Spec.Target.Repo, replacer.ConvertToMap(event), "main",
 		buildBranchName(inputEvent.Stage, nextStage, shkeptncontext),
 		buildTitle(shkeptncontext, nextStage),
 		buildBody(shkeptncontext, inputEvent.Project, inputEvent.Service, inputEvent.Stage), config.Spec.Paths); err != nil {
@@ -112,131 +119,13 @@ func handleFlatPRStrategy(event cloudevents.Event, inputEvent GitPromotionTrigge
 	}
 }
 
-func handleBranchStrategy(inputEvent GitPromotionTriggeredEventData, config model.PromotionConfig, shkeptncontext, nextStage, accessToken string) (status keptnv2.StatusType, result keptnv2.ResultType, message string, prLink *string) {
-	if msg, prLink, err := manageBranchStrategy(*config.Spec.Target.Repo, inputEvent.Stage, nextStage, accessToken, buildTitle(shkeptncontext, nextStage), buildBody(shkeptncontext, inputEvent.Project, inputEvent.Service, inputEvent.Stage)); err != nil {
+func handleBranchStrategy(client repoaccess.Client, inputEvent GitPromotionTriggeredEventData, config model.PromotionConfig, shkeptncontext, nextStage string) (status keptnv2.StatusType, result keptnv2.ResultType, message string, prLink *string) {
+	p := promoter.NewBranchPromoter(client, keptnPullRequestTitlePrefix)
+	if msg, prLink, err := p.Promote(*config.Spec.Target.Repo, inputEvent.Stage, nextStage, buildTitle(shkeptncontext, nextStage), buildBody(shkeptncontext, inputEvent.Project, inputEvent.Service, inputEvent.Stage)); err != nil {
 		logger.WithField("func", "handleBranchStrategy").WithError(err).Errorf("branch strategy failed on repository %s", *config.Spec.Target.Repo)
 		return keptnv2.StatusErrored, keptnv2.ResultFailed, "error while opening pull request", nil
 	} else {
 		return keptnv2.StatusSucceeded, keptnv2.ResultPass, msg, prLink
-	}
-}
-
-func manageFlatPRStrategy(repositoryUrl, accessToken string, fields map[string]string, sourceBranch, targetBranch, title, body string, paths []model.Path) (message string, prLink *string, err error) {
-	logger.WithField("func", "manageFlatPRStrategy").Infof("starting flat pr strategy with sourceBranch %s and targetBranch %s and fields %v", sourceBranch, targetBranch, fields)
-	if client, err := repoaccess.NewClient(accessToken, repositoryUrl); err != nil {
-		return "", nil, err
-	} else {
-		if exists, err := client.BranchExists(targetBranch); err != nil {
-			return "", nil, err
-		} else if exists {
-			return "", nil, errors.New(fmt.Sprintf("branch with name %s already exists", targetBranch))
-		}
-		if err := client.CreateBranch(sourceBranch, targetBranch); err != nil {
-			return "", nil, err
-		}
-		changes := 0
-		logger.WithField("func", "manageFlatPRStrategy").Infof("processing %d paths", len(paths))
-		for _, p := range paths {
-			var path string
-			if p.Source == nil {
-				path = *p.Target
-			} else {
-				path = *p.Source
-			}
-			pNewTargetFiles, err := client.GetFilesForBranch(sourceBranch, path)
-			if err != nil {
-				return "", nil, err
-			}
-			var pCurrentTargetFiles []repoaccess.RepositoryFile
-			if p.Source != nil {
-				if pCurrentTargetFiles, err = client.GetFilesForBranch(sourceBranch, *p.Target); err != nil {
-					return "", nil, err
-				}
-			} else {
-				pCurrentTargetFiles = pNewTargetFiles
-			}
-			for i, c := range pNewTargetFiles {
-				pNewTargetFiles[i].Content = replacer.Replace(c.Content, fields)
-				if p.Source != nil {
-					pNewTargetFiles[i].Path = strings.Replace(pNewTargetFiles[i].Path, *p.Source, *p.Target, -1)
-				}
-			}
-			if checkForChanges(pNewTargetFiles, pCurrentTargetFiles) {
-				if pathChanges, err := client.SyncFilesWithBranch(targetBranch, pCurrentTargetFiles, pNewTargetFiles); err != nil {
-					return "", nil, err
-				} else {
-					changes += pathChanges
-				}
-			} else {
-				logger.WithField("func", "manageFlatPRStrategy").Info("no changes detected, doing nothing")
-				return "no changes detected", nil, nil
-			}
-		}
-		logger.WithField("func", "manageFlatPRStrategy").Infof("commited %d changes to branch %s", changes, targetBranch)
-		if changes > 0 {
-			if pr, err := client.CreatePullRequest(targetBranch, sourceBranch, title, body); err != nil {
-				return "", nil, err
-			} else {
-				logger.WithField("func", "manageFlatPRStrategy").Infof("opened pull request %d in repo %s from branch %s to %s", pr.Number, repositoryUrl, sourceBranch, targetBranch)
-				return "opened pull request", &pr.URL, nil
-			}
-		} else {
-			logger.WithField("func", "manageFlatPRStrategy").Infof("no changes found, deleting branch %s", targetBranch)
-			if err := client.DeleteBranch(targetBranch); err != nil {
-				return "", nil, err
-			} else {
-				return "no changes found => no pull request necessary", nil, nil
-			}
-		}
-	}
-}
-
-func checkForChanges(files []repoaccess.RepositoryFile, files2 []repoaccess.RepositoryFile) bool {
-	if len(files) != len(files2) {
-		return true
-	}
-	tempmap := make(map[string]repoaccess.RepositoryFile)
-	for _, f := range files {
-		tempmap[f.Path] = f
-	}
-	for _, f2 := range files2 {
-		if f, ok := tempmap[f2.Path]; !ok {
-			return true
-		} else if f.Content != f2.Content {
-			return true
-		}
-	}
-	return false
-}
-
-func manageBranchStrategy(repositoryUrl, fromBranch, toBranch, accessToken, title, body string) (message string, prLink *string, err error) {
-	if client, err := repoaccess.NewClient(accessToken, repositoryUrl); err != nil {
-		return "", nil, err
-	} else if newCommits, err := client.CheckForNewCommits(toBranch, fromBranch); err != nil {
-		return "", nil, err
-	} else if !newCommits {
-		logger.WithField("func", "manageBranchStrategy").Infof("no difference found in repo %s from branch %s to %s", repositoryUrl, fromBranch, toBranch)
-		return fmt.Sprintf("no difference between branches %s and %s found => nothing todo", fromBranch, toBranch), nil, nil
-	} else if pr, err := client.GetOpenPullRequest(fromBranch, toBranch); err != nil {
-		return "", nil, err
-	} else if pr != nil {
-		logger.WithField("func", "manageBranchStrategy").Infof("pull request in repo %s from branch %s to %s already open with id %d and title %s", repositoryUrl, fromBranch, toBranch, pr.Number, pr.Title)
-		if strings.HasPrefix(pr.Title, keptnPullRequestTitlePrefix) {
-			if err := client.EditPullRequest(pr, title, body); err != nil {
-				return "", nil, err
-			}
-			logger.WithField("func", "manageBranchStrategy").Infof("updated pull request %d in repo %s from branch %s to %s", pr.Number, repositoryUrl, fromBranch, toBranch)
-			return "updated pull request", &pr.URL, nil
-		} else {
-			return "unmanaged pull request already open", &pr.URL, nil
-		}
-	} else {
-		pr, err := client.CreatePullRequest(fromBranch, toBranch, title, body)
-		if err != nil {
-			return message, nil, err
-		}
-		logger.WithField("func", "manageBranchStrategy").Infof("opened pull request %d in repo %s from branch %s to %s", pr.Number, repositoryUrl, fromBranch, toBranch)
-		return "opened pull request", &pr.URL, nil
 	}
 }
 
