@@ -4,6 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	promotionconfig "keptn/git-promotion-service/pkg/config"
+	"keptn/git-promotion-service/pkg/model"
+	"keptn/git-promotion-service/pkg/promoter"
+	"keptn/git-promotion-service/pkg/replacer"
+	"keptn/git-promotion-service/pkg/repoaccess"
+	"os"
+	"strings"
+
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/keptn/go-utils/pkg/api/models"
 	api "github.com/keptn/go-utils/pkg/api/utils"
@@ -12,13 +20,6 @@ import (
 	"gopkg.in/yaml.v3"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	promotionconfig "keptn/git-promotion-service/pkg/config"
-	"keptn/git-promotion-service/pkg/model"
-	"keptn/git-promotion-service/pkg/promoter"
-	"keptn/git-promotion-service/pkg/replacer"
-	"keptn/git-promotion-service/pkg/repoaccess"
-	"os"
-	"strings"
 )
 
 const GitPromotionTaskName = "git-promotion"
@@ -58,7 +59,7 @@ func (a *GitPromotionTriggeredEventHandler) Handle(event cloudevents.Event, kept
 
 func (a *GitPromotionTriggeredEventHandler) handleGitPromotionTriggeredEvent(event cloudevents.Event, inputEvent GitPromotionTriggeredEventData,
 	triggeredID, shkeptncontext string) []cloudevents.Event {
-	logger.WithField("func", "handleGitPromotionTriggeredEvent").Infof("start promoting service %s in project %s from stage %s", inputEvent.Stage, inputEvent.Service, inputEvent.Project)
+	logger.WithField("func", "handleGitPromotionTriggeredEvent").Infof("start promoting service %s in project %s from stage %s", inputEvent.Service, inputEvent.Stage, inputEvent.Project)
 	if err := a.keptn.SendCloudEvent(*a.getGitPromotionStartedEvent(inputEvent, triggeredID, shkeptncontext)); err != nil {
 		logger.WithField("func", "handleGitPromotionTriggeredEvent").WithError(err).Errorf("sending started event failed")
 		return []cloudevents.Event{*a.getGitPromotionFinishedEvent(inputEvent, keptnv2.StatusErrored, keptnv2.ResultFailed, "sending starting event failed", triggeredID, shkeptncontext, nil)}
