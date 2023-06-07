@@ -1,3 +1,5 @@
+> # Interested in Gitops with Keptn? We recommend you investigate the [Keptn Lifecycle Toolkit](https://lifecycle.keptn.sh).
+
 # Git Promotion Service
 
 # Artifacts
